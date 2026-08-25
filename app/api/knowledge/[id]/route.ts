@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 // PATCH /api/knowledge/[id] - 更新知识条目
 export const PATCH = withAuth(async (req, { supabase, userId }) => {
-  const id = req.url.split("/api/knowledge/")[1]?.split("?")[0] ?? "";
+  const id = req.url.split("/api/knowledge/")[1]?.split("?")[0]?.replace(/\/view$/, "") ?? "";
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return fail("无效的ID", 400);
 
   const body = await req.json();
@@ -43,7 +43,7 @@ export const PATCH = withAuth(async (req, { supabase, userId }) => {
 // DELETE /api/knowledge/[id] - 仅贡献者本人可删
 export const DELETE = withAuth(async (req, { supabase, userId }) => {
   void userId;
-  const id = req.url.split("/api/knowledge/")[1]?.split("?")[0] ?? "";
+  const id = req.url.split("/api/knowledge/")[1]?.split("?")[0]?.replace(/\/view$/, "") ?? "";
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return fail("无效的ID", 400);
 
   // RLS knowledge_delete_own 已限制为贡献者本人，这里直接删

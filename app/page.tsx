@@ -66,6 +66,12 @@ export default function Home() {
   const [kQ, setKQ] = useState("");
   const [kForm, setKForm] = useState({ title: "", category: "objection", content: "" });
   const [kEditing, setKEditing] = useState<any>(null);
+  const [viewDoc, setViewDoc] = useState<any>(null); // 查看全文弹窗
+
+  // ===== AI 接入设置状态 =====
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [llmCfg, setLlmCfg] = useState<{ provider: string; model: string; hasKey: boolean } | null>(null);
 
   // ===== 话术军火状态 =====
   const [situation, setSituation] = useState("");
@@ -230,10 +236,41 @@ export default function Home() {
     window.scrollTo({ top: 0 });
   }
 
-  async function deleteDoc(id: string) {
+    async function deleteDoc(id: string) {
     if (!confirm("删除这条知识？")) return;
     await apiFetch(`/api/knowledge/${id}`, { method: "DELETE" });
     loadKnowledge();
+  }
+
+  // 查看知识全文
+  async function viewDocFull(id: string) {
+    const res = await apiFetch(`/api/knowledge/${id}/view`);
+    if (res.ok) setViewDoc(await res.json());
+  }
+
+  // ===== AI 接入设置 =====
+  async function openSettings() {
+    setShowSettings(true);
+    setSettingsLoading(true);
+    try {
+      const res = await apiFetch("/api/llm-config");
+      const j = await res.json();
+      if (res.ok) setLlmCfg(j);
+    } catch {} finally {
+      setSettingsLoading(false);
+    }
+  }
+
+  async function saveLlmConfig(provider: string, apiKey: string, model?: string) {
+    const res = await apiFetch("/api/llm-config", {
+      method: "POST",
+      body: JSON.stringify({ provider, apiKey, model }),
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || "保存失败");
+    // 重新拉取当前配置
+    const cfgRes = await apiFetch("/api/llm-config");
+    if (cfgRes.ok) setLlmCfg(await cfgRes.json());
   }
 
   // ===== 话术军火 =====
@@ -282,7 +319,10 @@ export default function Home() {
     <main className="max-w-xl mx-auto p-4 pb-24">
       <header className="flex items-center justify-between mb-3">
         <h1 className="text-xl font-bold">🎯 销售情报官</h1>
-        <button onClick={logout} className="text-sm text-gray-400 hover:text-gray-600">退出</button>
+        <div className="flex items-center gap-3">
+          <button onClick={openSettings} className="text-sm text-gray-400 hover:text-gray-600" title="AI 接入设置">⚙️</button>
+          <button onClick={logout} className="text-sm text-gray-400 hover:text-gray-600">退出</button>
+        </div>
       </header>
 
       {/* 三标签导航 */}
@@ -510,21 +550,22 @@ export default function Home() {
           <div className="space-y-2">
             {docs.length === 0 && <div className="text-gray-400 text-center py-6 text-sm">暂无条目 — 把你的成交话术、踩坑经验存进来，AI 应对时就会用你的打法</div>}
             {docs.map(d => (
-              <div key={d.id} className="border rounded-xl p-3 bg-white text-sm">
+              <button key={d.id} onClick={() => viewDocFull(d.id)} className="w-full text-left border rounded-xl p-3 bg-white text-sm active:bg-gray-50">
                 <div className="flex justify-between items-start">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <span className={`text-xs px-1.5 py-0.5 rounded mr-1.5 ${d.category === "objection" ? "bg-red-50 text-red-600" : d.category === "case" ? "bg-green-50 text-green-700" : "bg-blue-50 text-blue-700"}`}>
                       {CAT_LABELS[d.category] || d.category}
                     </span>
                     <span className="font-medium">{d.title}</span>
                   </div>
-                  <div className="flex gap-2 shrink-0 ml-2">
+                  <div className="flex gap-2 shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
                     <button onClick={() => editDoc(d)} className="text-xs text-blue-500">改</button>
                     <button onClick={() => deleteDoc(d.id)} className="text-xs text-red-400">删</button>
                   </div>
                 </div>
                 <p className="text-gray-500 text-xs mt-1 line-clamp-2">{d.content}</p>
-              </div>
+                <div className="text-xs text-blue-400 mt-1">点击查看全文 →</div>
+              </button>
             ))}
           </div>
         </div>
@@ -570,6 +611,130 @@ export default function Home() {
           </div>
         </div>
       )}
+{/* ============ AI 接入设置弹窗 ============ */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setShowSettings(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-bold">⚙️ AI 接入设置</h3>
+              <button onClick={() => setShowSettings(false)} className="text-gray-400 text-xl">×</button>
+            </div>
+            {settingsLoading ? (
+              <div className="text-gray-400 text-sm py-6 text-center">加载中…</div>
+            ) : llmCfg ? (
+              <LlmSettingsPanel cfg={llmCfg} onSave={saveLlmConfig} />
+            ) : (
+              <div className="text-red-500 text-sm">加载失败，请关闭重试</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ============ 知识全文查看弹窗 ============ */}
+      {viewDoc && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4" onClick={() => setViewDoc(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <span className={`text-xs px-1.5 py-0.5 rounded mr-1.5 ${viewDoc.category === "objection" ? "bg-red-50 text-red-600" : viewDoc.category === "case" ? "bg-green-50 text-green-700" : "bg-blue-50 text-blue-700"}`}>
+                  {CAT_LABELS[viewDoc.category] || viewDoc.category}
+                </span>
+                <h3 className="font-bold inline">{viewDoc.title}</h3>
+              </div>
+              <button onClick={() => setViewDoc(null)} className="text-gray-400 text-xl leading-none">×</button>
+            </div>
+            <div className="prose-sm whitespace-pre-wrap border rounded-xl p-3 bg-gray-50 mt-2">{viewDoc.content}</div>
+            <div className="text-xs text-gray-400 mt-2">
+              {new Date(viewDoc.created_at).toLocaleString("zh-CN")} · 全社区共享知识
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+// ===== AI 设置面板子组件 =====
+const KNOWN_PROVIDERS: Record<string, { label: string; baseURL: string; defaultModel: string }> = {
+  deepseek: { label: "DeepSeek", baseURL: "https://api.deepseek.com/v1", defaultModel: "deepseek-chat" },
+  zhipu:    { label: "智谱 GLM", baseURL: "https://open.bigmodel.cn/api/paas/v4", defaultModel: "glm-4-flash" },
+  qwen:     { label: "通义千问", baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus" },
+  agnes:    { label: "Agnes AI", baseURL: "https://apihub.agnes-ai.com/v1", defaultModel: "agnes-2.5-flash" },
+  openai:   { label: "OpenAI", baseURL: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini" },
+};
+
+function LlmSettingsPanel({ cfg, onSave }: {
+  cfg: { provider: string; model: string; hasKey: boolean };
+  onSave: (provider: string, apiKey: string, model?: string) => Promise<void>;
+}) {
+  const isCustom = !KNOWN_PROVIDERS[cfg.provider];
+  const [mode, setMode] = useState<"preset" | "custom">(isCustom ? "custom" : "preset");
+  const [provider, setProvider] = useState(cfg.provider);
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("");
+  const [customBaseURL, setCustomBaseURL] = useState("");
+  const [customName, setCustomName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  async function handleSave() {
+    setSaving(true); setMsg("");
+    try {
+      if (mode === "preset") {
+        await onSave(provider, apiKey);
+      } else {
+        if (!customBaseURL.trim() || !customName.trim()) throw new Error("自定义接口需填写名称和 API 地址");
+        await onSave(`custom:${customName.trim()}|${customBaseURL.trim()}`, apiKey, model.trim() || undefined);
+      }
+      setMsg("✓ 已生效，立即启用新模型");
+      setApiKey("");
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls = "w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-blue-50 rounded-lg p-3 text-xs text-blue-800">
+        当前使用：<b>{isCustom ? `${cfg.provider.split("|")[0]}（自定义）` : KNOWN_PROVIDERS[cfg.provider]?.label || cfg.provider}</b>
+        {" · "}模型：<b>{cfg.model}</b>{" · "}Key：{cfg.hasKey ? "已配置 ✓" : "未配置 ✗"}
+      </div>
+
+      <div className="flex bg-gray-100 rounded-lg p-0.5">
+        <button onClick={() => setMode("preset")} className={`flex-1 py-1.5 rounded-md text-xs ${mode === "preset" ? "bg-white shadow font-medium" : "text-gray-500"}`}>常用服务商</button>
+        <button onClick={() => setMode("custom")} className={`flex-1 py-1.5 rounded-md text-xs ${mode === "custom" ? "bg-white shadow font-medium" : "text-gray-500"}`}>自定义接口</button>
+      </div>
+
+      {mode === "preset" && (
+        <>
+          <select className={inputCls} value={provider} onChange={e => setProvider(e.target.value)}>
+            {Object.entries(KNOWN_PROVIDERS).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}（默认模型: {v.defaultModel}）</option>
+            ))}
+          </select>
+          <input type="password" className={inputCls} placeholder="输入新的 API Key（留空则沿用现有）" value={apiKey} onChange={e => setApiKey(e.target.value)} />
+        </>
+      )}
+
+      {mode === "custom" && (
+        <>
+          <input className={inputCls} placeholder="接口名称（如：我的中转站）" value={customName} onChange={e => setCustomName(e.target.value)} />
+          <input className={inputCls} placeholder="API Base URL（如 https://xxx.com/v1）" value={customBaseURL} onChange={e => setCustomBaseURL(e.target.value)} />
+          <input className={inputCls} placeholder="模型名（如 gpt-4o-mini，可选）" value={model} onChange={e => setModel(e.target.value)} />
+          <input type="password" className={inputCls} placeholder="API Key" value={apiKey} onChange={e => setApiKey(e.target.value)} />
+          <p className="text-xs text-gray-400">兼容 OpenAI Chat Completions 协议的任何服务均可接入</p>
+        </>
+      )}
+
+      <button onClick={handleSave} disabled={saving}
+        className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium active:bg-blue-700 disabled:bg-gray-400">
+        {saving ? "保存中…" : "保存并立即生效"}
+      </button>
+      {msg && <div className={`text-xs ${msg.startsWith("✓") ? "text-green-600" : "text-red-500"}`}>{msg}</div>}
+    </div>
   );
 }

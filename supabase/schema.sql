@@ -77,6 +77,18 @@ create table if not exists public.knowledge_docs (
 create index if not exists idx_knowledge_user on public.knowledge_docs(user_id);
 create index if not exists idx_knowledge_user_cat on public.knowledge_docs(user_id, category);
 
+-- ============ v6 新增：app_settings 运行时配置表 ============
+-- 存储网页端动态修改的 AI 接入配置（provider/apiKey/model）
+create table if not exists public.app_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz default now()
+);
+
+alter table public.app_settings enable row level security;
+drop policy if exists "app_settings_service_only" on public.app_settings;
+-- 无 policy = 仅 service_role 可读写（前端 anon key 无法触碰），安全
+
 -- ============ RLS 安全策略 ============
 alter table public.clients enable row level security;
 alter table public.interactions enable row level security;

@@ -8,7 +8,7 @@ const MAX_CHARS = 6000; // 单条知识上限（超出截断）
 
 export async function embedText(text: string): Promise<number[] | null> {
   try {
-    const p = getProvider();
+    const p = await getProvider();
     if (!p.apiKey) return null;
 
     const controller = new AbortController();

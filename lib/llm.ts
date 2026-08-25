@@ -1,8 +1,16 @@
 // 多模型适配器 - 所有主流厂商兼容 OpenAI 协议
-// 切换供应商 = 改一个环境变量，架构层面为出海预留
+// 运行时配置优先（网页端动态切换）> 环境变量 > 默认值
 import { optionalEnv } from "./env";
+import { getLlmConfig, LlmRuntimeConfig } from "./llm-config";
 
-const PROVIDERS: Record<string, { baseURL: string; model: string }> = {
+interface ResolvedProvider {
+  baseURL: string;
+  model: string;
+  apiKey: string;
+  name: string;
+}
+
+const KNOWN_PROVIDERS: Record<string, { baseURL: string; model: string }> = {
   deepseek: { baseURL: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   zhipu:    { baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
   qwen:     { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
@@ -10,17 +18,34 @@ const PROVIDERS: Record<string, { baseURL: string; model: string }> = {
   openai:   { baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini" },
 };
 
-export function getProvider() {
-  const name = optionalEnv("LLM_PROVIDER", "deepseek");
-  const p = PROVIDERS[name];
-  if (!p) throw Object.assign(new Error(`未知模型商: ${name}，可选: ${Object.keys(PROVIDERS).join("/")}`), { status: 500 });
-  return { ...p, apiKey: process.env[`${name.toUpperCase()}_API_KEY`] || "", name };
+function resolveProvider(cfg: LlmRuntimeConfig): ResolvedProvider | null {
+  // 自定义接口格式：custom:名称|baseURL
+  if (cfg.provider.startsWith("custom:")) {
+    const [, rest] = cfg.provider.split("custom:");
+    const [name, baseURL] = rest.split("|");
+    return { name: `custom:${name}`, baseURL, model: cfg.model || "gpt-4o-mini", apiKey: cfg.apiKey || "" };
+  }
+  const p = KNOWN_PROVIDERS[cfg.provider];
+  if (!p) return null;
+  return {
+    ...p,
+    name: cfg.provider,
+    apiKey: cfg.apiKey ?? ((cfg.source !== "database" ? process.env[`${cfg.provider.toUpperCase()}_API_KEY`] : undefined) || ""),
+  };
+}
+
+export function getProvider(): Promise<ResolvedProvider> {
+  return getLlmConfig().then((cfg) => {
+    const p = resolveProvider(cfg);
+    if (!p) throw Object.assign(new Error(`未知模型商: ${cfg.provider}`), { status: 500 });
+    return p;
+  });
 }
 
 export async function* streamChat(messages: { role: string; content: string }[]) {
-  const p = getProvider();
+  const p = await getProvider();
   if (!p.apiKey) {
-    throw Object.assign(new Error(`${p.name.toUpperCase()}_API_KEY 未配置`), { status: 500 });
+    throw Object.assign(new Error(`${p.name} 的 API Key 未配置`), { status: 500 });
   }
 
   const controller = new AbortController();
