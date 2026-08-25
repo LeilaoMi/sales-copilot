@@ -40,6 +40,9 @@ create table if not exists public.interactions (
 create index if not exists idx_interactions_client on public.interactions(client_id);
 create index if not exists idx_interactions_client_time on public.interactions(client_id, created_at desc);
 
+-- v3 增量迁移：老库补列（幂等）
+alter table public.interactions add column if not exists raw_content text;
+
 -- ============ v3 新增：knowledge_docs 话术知识库 ============
 create table if not exists public.knowledge_docs (
   id uuid primary key default gen_random_uuid(),
