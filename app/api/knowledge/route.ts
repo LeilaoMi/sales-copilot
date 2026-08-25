@@ -6,16 +6,17 @@ export const runtime = "nodejs";
 
 const VALID_CATS = ["objection", "faq", "competitor", "case", "script", "other"];
 
-// GET /api/knowledge?q=关键词 - 列出/搜索知识条目
+// GET /api/knowledge?q=关键词 - 列出/搜索知识条目（全局共享：所有人可读）
 export const GET = withAuth(async (req, { supabase, userId }) => {
+  void userId;
   const q = new URL(req.url).searchParams.get("q")?.trim();
 
+  // 不再按 user_id 过滤——知识库是全社区共享的
   let query = supabase
     .from("knowledge_docs")
     .select("id,title,category,content,created_at")
-    .eq("user_id", userId)
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(500);
 
   if (q) {
     const safeQ = q.replace(/[,()"']/g, "");

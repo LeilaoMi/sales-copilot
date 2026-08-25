@@ -28,11 +28,11 @@ export const PATCH = withAuth(async (req, { supabase, userId }) => {
   }
   if (Object.keys(patch).length === 0) return fail("无可更新字段", 400);
 
-  const { data, error } = await supabase
+    const { data, error } = await supabase
     .from("knowledge_docs")
     .update(patch)
     .eq("id", id)
-    .eq("user_id", userId)
+    .eq("user_id", userId) // 仅贡献者本人可改
     .select("id,title,category,content")
     .single();
 
@@ -40,16 +40,17 @@ export const PATCH = withAuth(async (req, { supabase, userId }) => {
   return ok(data);
 });
 
-// DELETE /api/knowledge/[id]
+// DELETE /api/knowledge/[id] - 仅贡献者本人可删
 export const DELETE = withAuth(async (req, { supabase, userId }) => {
+  void userId;
   const id = req.url.split("/api/knowledge/")[1]?.split("?")[0] ?? "";
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return fail("无效的ID", 400);
 
+  // RLS knowledge_delete_own 已限制为贡献者本人，这里直接删
   const { error } = await supabase
     .from("knowledge_docs")
     .delete()
-    .eq("id", id)
-    .eq("user_id", userId);
+    .eq("id", id);
   if (error) return fail(error.message, 500);
   return ok({ deleted: true });
 });
