@@ -32,7 +32,7 @@ export const GET = withAuth(async (req, { supabase, userId }) => {
   const { data, error } = await query;
   if (error) return fail(error.message, 500);
   return ok(data || []);
-}
+});
 
 // POST /api/knowledge - 新增知识条目（自动向量化，支持行业标签）
 export const POST = withAuth(async (req, { supabase, userId }) => {
@@ -47,7 +47,7 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
   if (Array.isArray(body.industry_tags)) {
     industryTags = body.industry_tags.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 5);
   } else if (typeof body.industry_tags === "string") {
-    industryTags = body.industry_tags.split(/[,，、\s]+/).map((t) => t.trim()).filter(Boolean).slice(0, 5);
+    industryTags = body.industry_tags.split(/[,，、\s]+/).map((t: any) => t.trim()).filter(Boolean).slice(0, 5);
   }
 
   // 向量化失败不阻塞入库
