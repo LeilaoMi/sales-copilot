@@ -25,6 +25,7 @@ export interface Interaction {
   objections: string[] | null;
   next_step: string | null;
   next_step_time: string | null;
+  raw_content?: string | null;
   created_at: string;
 }
 

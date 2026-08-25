@@ -30,10 +30,11 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
       client_id: body.client_id,
       type: body.type,
       summary: body.summary || null,
-      commitments: Array.isArray(body.commitments) ? body.commitments : null,
-      objections: Array.isArray(body.objections) ? body.objections : null,
+      commitments: Array.isArray(body.commitments) && body.commitments.length > 0 ? body.commitments : null,
+      objections: Array.isArray(body.objections) && body.objections.length > 0 ? body.objections : null,
       next_step: body.next_step || null,
       next_step_time: nextStepTime,
+      raw_content: body.raw_content ? String(body.raw_content).slice(0, 8000) : null,
     })
     .select()
     .single();
