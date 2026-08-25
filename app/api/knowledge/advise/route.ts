@@ -24,6 +24,18 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
 
   if (error) return fail(error.message, 500);
 
+  // 懒加载向量化：给历史遗留的无向量条目补算（每次最多5条，逐步自愈）
+  if (docs && docs.length > 0) {
+    const missing = docs.filter((d) => !Array.isArray(d.embedding)).slice(0, 5);
+    for (const d of missing) {
+      const vec = await embedText(`${d.title}\n${String(d.content).slice(0, 2000)}`);
+      if (vec) {
+        await supabase.from("knowledge_docs").update({ embedding: vec }).eq("id", d.id).eq("user_id", userId);
+        d.embedding = vec;
+      }
+    }
+  }
+
   let references: { id: string; title: string; category: string; score?: number }[] = [];
   let contextBlock = "";
 
@@ -53,16 +65,28 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
       }
     }
 
-    // 向量检索无果时关键词兜底
+    // 向量检索无果时中文 bigram 关键词兜底（不依赖分词，双字滑窗匹配）
     if (!contextBlock) {
-      const kw = docs.filter(
-        (d) =>
-          d.title.includes(situation.slice(0, 4)) ||
-          situation.split(/\s+/).some((w) => w.length > 1 && String(d.content).includes(w))
-      ).slice(0, 2);
+      const cleanSituation = situation.replace(/[，。！？、\s]/g, "");
+      const grams = new Set<string>();
+      for (let i = 0; i < cleanSituation.length - 1; i++) {
+        if (/[\u4e00-\u9fa5a-zA-Z]/.test(cleanSituation[i]) && /[\u4e00-\u9fa5a-zA-Z]/.test(cleanSituation[i + 1])) {
+          grams.add(cleanSituation.slice(i, i + 2));
+        }
+      }
+      const kw = docs
+        .map((d) => {
+          const hay = `${d.title}${String(d.content).replace(/[\s\*\#]/g, "")}`;
+          let hits = 0;
+          grams.forEach((g) => { if (hay.includes(g)) hits++; });
+          return { d, hits };
+        })
+        .filter((x) => x.hits >= 3)
+        .sort((a, b) => b.hits - a.hits)
+        .slice(0, 2);
       if (kw.length > 0) {
-        references = kw.map((d) => ({ id: d.id as string, title: d.title as string, category: d.category as string }));
-        contextBlock = `\n\n知识库相关参考：\n${kw.map((d) => `[${d.title}] ${(d.content as string).slice(0, 500)}`).join("\n")}`;
+        references = kw.map((x) => ({ id: x.d.id as string, title: x.d.title as string, category: x.d.category as string }));
+        contextBlock = `\n\n知识库相关参考：\n${kw.map((x) => `[${x.d.title}] ${(String(x.d.content)).slice(0, 500)}`).join("\n")}`;
       }
     }
   }
