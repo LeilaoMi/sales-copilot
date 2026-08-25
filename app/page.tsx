@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
-import { apiFetch } from "@/lib/api-client";
+import { apiFetch, startFollowUpNotifier } from "@/lib/api-client";
 import { getSupabaseBrowser } from "@/lib/supabase-browser";
 import type { Client, Interaction } from "@/lib/types";
 
@@ -133,6 +133,17 @@ export default function Home() {
   useEffect(() => { if (authChecked && tab === "history") loadHistory(searchQ); }, [searchQ, authChecked, tab, loadHistory]);
   useEffect(() => { if (authChecked && tab === "knowledge") loadKnowledge(kQ); }, [kQ, authChecked, tab, loadKnowledge]);
 
+  // 跟进提醒：请求通知权限 + 启动轮询
+  useEffect(() => {
+    if (!authChecked) return;
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    startFollowUpNotifier((items) => {
+      if (items.length > 0) loadDashboard();
+    });
+  }, [authChecked, loadDashboard]);
+
   async function analyze(retryClientId?: string, retryData?: Partial<typeof form>) {
     const payload = retryData ?? form;
     if (!payload.name?.trim()) { setError("客户姓名必填"); return; }
@@ -258,6 +269,39 @@ export default function Home() {
     if (cfgRes.ok) setLlmCfg(await cfgRes.json());
   }
 
+  // ===== AI 周报 =====
+  const [showWeekly, setShowWeekly] = useState(false);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [weeklyReport, setWeeklyReport] = useState("");
+
+  async function genWeeklyReport() {
+    setShowWeekly(true); setWeeklyLoading(true); setWeeklyReport("");
+    try {
+      const res = await apiFetch("/api/weekly-report", { method: "POST" });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "生成失败");
+      setWeeklyReport(j.report);
+    } catch (e: any) { setError(e.message); setShowWeekly(false); }
+    finally { setWeeklyLoading(false); }
+  }
+
+  // ===== 会话→知识沉淀 =====
+  const [distillingId, setDistillingId] = useState("");
+
+  async function distillToKnowledge(interactionId: string) {
+    if (!confirm("将此交互提炼为社区共享知识（自动脱敏）？")) return;
+    setDistillingId(interactionId);
+    try {
+      const res = await apiFetch("/api/knowledge/from-interaction", {
+        method: "POST", body: JSON.stringify({ interaction_id: interactionId }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "沉淀失败");
+      alert(`✓ 已入库：《${j.doc?.title}》`);
+    } catch (e: any) { setError(e.message); }
+    finally { setDistillingId(""); }
+  }
+
   async function getAdvice() {
     if (!situation.trim()) return;
     setAdviceLoading(true); setAdvice(null); setError("");
@@ -364,7 +408,7 @@ export default function Home() {
                 )}
               </div>
 
-              <div className={`${card} p-4`}>
+                            <div className={`${card} p-4`}>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-slate-800">⏰ 本周待跟进</h3>
                   {dash.weeklyFollowUps.length>0 && <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">{dash.weeklyFollowUps.length} 条</span>}
@@ -386,6 +430,16 @@ export default function Home() {
                   </div>
                 )}
               </div>
+
+              {/* AI 周报入口 */}
+              <button onClick={genWeeklyReport}
+                className={`w-full ${card} p-4 flex items-center justify-between group hover:border-indigo-300 transition-colors`}>
+                <div className="text-left">
+                  <h3 className="text-sm font-semibold text-slate-800">📊 AI 周报复盘</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">汇总本周数据，生成复盘与下周行动清单</p>
+                </div>
+                <span className="text-indigo-400 group-hover:translate-x-1 transition-transform">→</span>
+              </button>
 
               {dash.objectionTop.length>0 && (
                 <div className={`${card} p-4`}>
@@ -564,6 +618,12 @@ export default function Home() {
                   <div className="mt-1"><span className="text-red-500 text-xs">⚠️ 异议:</span>{(it.objections as string[]).map((o,i)=><span key={i} className="text-xs bg-red-50 text-red-600 rounded-md px-1.5 py-0.5 mx-1 inline-block ring-1 ring-red-600/10">{o}</span>)}</div>
                 )}
                 {it.next_step && <p className="mt-1.5 text-orange-500">→ {it.next_step}{it.next_step_time?` (${new Date(it.next_step_time).toLocaleString("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})})`:""}</p>}
+                <div className="mt-2 pt-2 border-t border-slate-100 flex justify-end">
+                  <button onClick={()=>distillToKnowledge(it.id)} disabled={distillingId===it.id}
+                    className="text-xs text-purple-500 hover:text-purple-700 disabled:text-slate-300 transition-colors">
+                    {distillingId===it.id?"提炼中…":"✦ 沉淀为共享知识"}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -715,6 +775,33 @@ export default function Home() {
             </div>
             <div className="whitespace-pre-wrap border border-slate-100 rounded-xl p-3.5 bg-slate-50/80 text-sm text-slate-700 mt-2">{viewDoc.content}</div>
             <div className="text-xs text-slate-400 mt-2">{new Date(viewDoc.created_at).toLocaleString("zh-CN")} · 全社区共享知识</div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 周报弹窗 */}
+      {showWeekly && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4" onClick={()=>setShowWeekly(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto p-4" onClick={e=>e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-bold text-slate-900">📊 AI 周报复盘</h3>
+              <button onClick={()=>setShowWeekly(false)} className="text-slate-400 text-xl">×</button>
+            </div>
+            {weeklyLoading ? (
+              <div className="py-10 text-center space-y-3">
+                <div className="animate-pulse text-indigo-500 text-sm">AI 正在分析本周数据…</div>
+                <div className="flex justify-center gap-1.5">
+                  {[...Array(3)].map((_,i)=><span key={i} className="w-2 h-2 rounded-full bg-indigo-300 animate-bounce" style={{animationDelay:`${i*0.15}s`}}/>)}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="prose-sm border border-slate-100 rounded-xl p-4 bg-slate-50/80"><ReactMarkdown>{weeklyReport}</ReactMarkdown></div>
+                <button onClick={()=>copyText(weeklyReport,"weekly")} className="mt-3 w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-slate-700 transition-colors">
+                  {copiedId==="weekly"?"✓ 已复制到剪贴板":"复制周报全文"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
