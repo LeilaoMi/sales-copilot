@@ -6,6 +6,7 @@ const PROVIDERS: Record<string, { baseURL: string; model: string }> = {
   deepseek: { baseURL: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   zhipu:    { baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
   qwen:     { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  agnes:    { baseURL: "https://apihub.agnes-ai.com/v1", model: "agnes-2.5-flash" },
   openai:   { baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini" },
 };
 
