@@ -39,12 +39,12 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
   let references: { id: string; title: string; category: string; score?: number }[] = [];
   let contextBlock = "";
 
-  // 中文 bigram 提取（供混合评分使用）
+  // 中文 bigram 提取（含数字——价格/百分比是销售场景核心信号）
   function extractGrams(text: string): Set<string> {
     const clean = text.replace(/[，。！？、\s]/g, "");
     const grams = new Set<string>();
     for (let i = 0; i < clean.length - 1; i++) {
-      if (/[\u4e00-\u9fa5a-zA-Z]/.test(clean[i]) && /[\u4e00-\u9fa5a-zA-Z]/.test(clean[i + 1])) {
+      if (/[\u4e00-\u9fa5a-zA-Z0-9]/.test(clean[i]) && /[\u4e00-\u9fa5a-zA-Z0-9]/.test(clean[i + 1])) {
         grams.add(clean.slice(i, i + 2));
       }
     }
@@ -66,17 +66,23 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
     const situationGrams = extractGrams(situation);
     const queryVec = await embedText(situation);
 
-    const scoredDocs: ScoredDoc[] = docs.map((d) => {
+        const scoredDocs: ScoredDoc[] = docs.map((d) => {
       let vectorScore = 0;
       if (queryVec && Array.isArray(d.embedding)) {
         vectorScore = cosineSimilarity(queryVec, d.embedding as number[]);
       }
-      // bigram 命中数（归一化到 0-1）
-      const hay = `${d.title}${String(d.content).replace(/[\s\*\#]/g, "")}`;
-      let hits = 0;
-      situationGrams.forEach((g) => { if (hay.includes(g)) hits++; });
-      const kwHits = hits;
-      const kwNorm = Math.min(hits / Math.max(situationGrams.size * 0.15, 5), 1);
+      // bigram 命中：标题双倍权重（标题是条目的核心信号）
+      const titleClean = String(d.title).replace(/[\s\*\#]/g, "");
+      const bodyClean = String(d.content).replace(/[\s\*\#]/g, "");
+      let titleHits = 0;
+      let bodyHits = 0;
+      situationGrams.forEach((g) => {
+        if (titleClean.includes(g)) titleHits++;
+        else if (bodyClean.includes(g)) bodyHits++;
+      });
+      const kwHits = titleHits * 2 + bodyHits;
+      // 归一化：命中数达到「情境gram数的20%」或绝对值6即视为满分
+      const kwNorm = Math.min(kwHits / Math.max(situationGrams.size * 0.2, 6), 1);
 
       return {
         id: d.id as string,
