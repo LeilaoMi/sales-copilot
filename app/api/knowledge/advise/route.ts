@@ -15,12 +15,11 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
   const situation = String(body.situation || "").trim();
   if (!situation) return fail("请输入客户情境", 400);
 
-  // 1. 检索知识库
+  // 1. 检索知识库（全局共享：检索所有人的知识）
   const { data: docs, error } = await supabase
     .from("knowledge_docs")
     .select("id,title,category,content,embedding")
-    .eq("user_id", userId)
-    .limit(200);
+    .limit(500);
 
   if (error) return fail(error.message, 500);
 
@@ -30,7 +29,8 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
     for (const d of missing) {
       const vec = await embedText(`${d.title}\n${String(d.content).slice(0, 2000)}`);
       if (vec) {
-        await supabase.from("knowledge_docs").update({ embedding: vec }).eq("id", d.id).eq("user_id", userId);
+        // service_role 客户端绕过 RLS，可更新任意贡献者的条目
+        await supabase.from("knowledge_docs").update({ embedding: vec }).eq("id", d.id);
         d.embedding = vec;
       }
     }
@@ -96,17 +96,26 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
       };
     });
 
-    // 按混合分排序取 top3
-    const top3 = scoredDocs
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3)
-      .filter((d) => d.score > 0.25); // 混合阈值
-
-    if (top3.length > 0) {
-      references = top3.map(({ content: _c, ...rest }) => rest);
-      contextBlock = `\n\n以下是你的知识库中匹配到的相关经验（按相关度排序），优先参考排位靠前的策略和话术风格：\n${top3
-        .map((d, i) => `[经验${i + 1}] ${d.title}：\n${d.content.slice(0, 800)}`)
-        .join("\n\n")}`;
+// 向量检索无果时中文 bigram 关键词兜底（不依赖分词，双字滑窗匹配）
+    if (references.length === 0) {
+      const cleanSituation = situation.replace(/[，。！？、\s]/g, "");
+      const grams = new Set<string>();
+      for (let i = 0; i < cleanSituation.length - 1; i++) {
+        if (/[\u4e00-\u9fa5a-zA-Z0-9]/.test(cleanSituation[i]) && /[\u4e00-\u9fa5a-zA-Z0-9]/.test(cleanSituation[i + 1])) {
+          grams.add(cleanSituation.slice(i, i + 2));
+        }
+      }
+      const kw = scoredDocs
+        .map((x) => ({ ...x }))
+        .filter((x) => x.kwHits >= 3)
+        .sort((a, b) => b.kwHits - a.kwHits)
+        .slice(0, 2);
+      if (kw.length > 0) {
+        references = kw.map((x) => ({ id: x.id, title: x.title, category: x.category, score: x.score }));
+        contextBlock = `\n\n知识库相关参考（按命中度排序）：\n${kw
+          .map((x, i) => `[参考${i + 1}] ${x.title}：\n${String(x.content).slice(0, 600)}`)
+          .join("\n\n")}`;
+      }
     }
   }
 
