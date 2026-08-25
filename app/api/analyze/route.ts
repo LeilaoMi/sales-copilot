@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { withAuth, fail } from "@/lib/api-utils";
 import { streamChat, buildBriefPrompt } from "@/lib/llm";
+import { webSearch } from "@/lib/search";
 
 export const runtime = "nodejs";
 export const maxDuration = 300; // Vercel 免费档函数上限，防 10s 掐断
@@ -13,9 +14,7 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
 
   // 定位目标客户：已有客户重新生成 / 新客户先建行
   let clientId = client_id as string | undefined;
-  let isNew = false;
   if (!clientId) {
-    isNew = true;
     const { data: inserted, error: insErr } = await supabase
       .from("clients")
       .insert({ user_id: userId, name: String(name).trim(), title: title || null, company: company || null, industry: industry || null, note: note || null, stage: "lead", status: "generating" })
@@ -30,7 +29,9 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
   // 标记生成中
   await supabase.from("clients").update({ status: "generating" }).eq("id", clientId).eq("user_id", userId);
 
-  const prompt = buildBriefPrompt({ name, title, company, industry, note });
+  // 先联网搜集情报（无 Key 自动降级为纯模型知识模式）
+  const search = await webSearch({ name, title, company, industry });
+  const prompt = buildBriefPrompt({ name, title, company, industry, note }, search.contextBlock);
 
   // 流式转发给前端，同时服务端累积全文
   let fullReport = "";

@@ -6,7 +6,6 @@ const PROVIDERS: Record<string, { baseURL: string; model: string }> = {
   deepseek: { baseURL: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   zhipu:    { baseURL: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
   qwen:     { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
-  agnes:    { baseURL: "https://apihub.agnes-ai.com/v1", model: "agnes-2.5-flash" },
   openai:   { baseURL: "https://api.openai.com/v1", model: "gpt-4o-mini" },
 };
 
@@ -73,14 +72,17 @@ export async function* streamChat(messages: { role: string; content: string }[])
   }
 }
 
-export function buildBriefPrompt(client: { name: string; title?: string; company?: string; industry?: string; note?: string }) {
+export function buildBriefPrompt(client: { name: string; title?: string; company?: string; industry?: string; note?: string }, searchContext?: string) {
   const t = client.title || "关键决策人";
-  return `你是资深B2B销售情报分析官。基于行业知识，为以下销售任务生成作战简报。
+  const contextSection = searchContext
+    ? `\n以下是刚刚从互联网搜集到的实时资料，优先采信其中的事实，模型自身知识作为补充；资料未覆盖的部分基于行业常识推理：\n${searchContext}\n`
+    : `\n注意：本次没有联网资料，请基于你的行业知识推理生成，涉及具体数据时明确标注"（待核实）"。\n`;
+  return `你是资深B2B销售情报分析官。为以下销售任务生成作战简报。
 客户信息：
 - 姓名：${client.name}，职位：${t}
 - 公司：${client.company || "未知"}（${client.industry || "未知"}行业）
 - 背景：${client.note || "无"}
-
+${contextSection}
 严格按以下 Markdown 结构输出，内容必须具体、可执行、有洞察，禁止空话套话：
 
 # 客户作战简报：${client.name}
@@ -91,7 +93,8 @@ export function buildBriefPrompt(client: { name: string; title?: string; company
 ## 三、${t}最关心的三件事
 ## 四、首次拜访开场白（中文版，90秒内讲完，含一个钩子问题）
 ## 五、Opening Script (English)
-## 六、雷区提醒`;
+## 六、雷区提醒
+${searchContext ? "\n## 七、情报来源\n（列出你实际引用的资料编号及标题，一行一条）" : ""}`;
 }
 
 // 从流式输出中提取客户姓名（用于失败时兜底入库），提取不到返回 null
