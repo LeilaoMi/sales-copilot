@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.prose-sm h1 { font-size: 1.25rem; font-weight: 700; margin: 0.8rem 0 0.4rem; }
+.prose-sm h2 { font-size: 1.05rem; font-weight: 700; margin: 0.8rem 0 0.3rem; color: #1d4ed8; }
+.prose-sm p { margin: 0.3rem 0; line-height: 1.7; }
+.prose-sm ul, .prose-sm ol { padding-left: 1.2rem; margin: 0.3rem 0; }
+.prose-sm li { margin: 0.15rem 0; line-height: 1.6; }
+.prose-sm strong { color: #111; }
