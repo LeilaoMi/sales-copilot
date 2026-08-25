@@ -1,10 +1,8 @@
-"use client";
-
 // 全局 fetch 封装 - 自动带 token、401 自动跳登录
 import { getSupabaseBrowser } from "./supabase-browser";
 
 export async function apiFetch(url: string, options: RequestInit = {}) {
-  const supabase = getSupabaseBrowser();
+  const supabase = await getSupabaseBrowser();
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
 

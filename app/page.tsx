@@ -30,12 +30,18 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
-  // 鉴权守卫
+  // 鉴权守卫（运行时加载配置）
   useEffect(() => {
-    getSupabaseBrowser().auth.getSession().then(({ data: { session } }) => {
-      if (!session) router.replace("/login");
-      else setAuthChecked(true);
-    });
+    let cancelled = false;
+    getSupabaseBrowser()
+      .then((supabase) => supabase.auth.getSession())
+      .then(({ data: { session } }) => {
+        if (cancelled) return;
+        if (!session) router.replace("/login");
+        else setAuthChecked(true);
+      })
+      .catch(() => setError("服务配置加载失败，请刷新重试"));
+    return () => { cancelled = true; };
   }, [router]);
 
   const loadHistory = useCallback(async (q?: string) => {
@@ -61,11 +67,13 @@ export default function Home() {
     abortRef.current = new AbortController();
 
     try {
+      const supabase = await getSupabaseBrowser();
+      const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${(await getSupabaseBrowser().auth.getSession()).data.session!.access_token}`,
+          Authorization: `Bearer ${session!.access_token}`,
         },
         body: JSON.stringify({ ...payload, client_id: retryClientId }),
         signal: abortRef.current.signal,
@@ -140,8 +148,8 @@ export default function Home() {
     setTimeout(() => setCopied(false), 1500);
   }
 
-  function logout() {
-    getSupabaseBrowser().auth.signOut();
+  async function logout() {
+    (await getSupabaseBrowser()).auth.signOut();
     router.replace("/login");
   }
 

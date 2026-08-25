@@ -17,9 +17,9 @@ export default function LoginPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(""); setLoading(true);
-    const supabase = getSupabaseBrowser();
 
     try {
+      const supabase = await getSupabaseBrowser();
       if (mode === "signin") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw new Error(error.message);
