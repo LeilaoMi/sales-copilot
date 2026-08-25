@@ -39,55 +39,68 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
   let references: { id: string; title: string; category: string; score?: number }[] = [];
   let contextBlock = "";
 
-  if (docs && docs.length > 0) {
-    const queryVec = await embedText(situation);
-
-    if (queryVec) {
-      // 向量语义检索 top3
-      const scored = docs
-        .filter((d) => Array.isArray(d.embedding))
-        .map((d) => ({
-          id: d.id as string,
-          title: d.title as string,
-          category: d.category as string,
-          content: d.content as string,
-          score: cosineSimilarity(queryVec, d.embedding as number[]),
-        }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .filter((d) => d.score > 0.35); // 相似度阈值
-
-      references = scored.map(({ content: _c, ...rest }) => rest);
-      if (scored.length > 0) {
-        contextBlock = `\n\n以下是你的知识库中匹配到的相关经验，优先参考其中的策略和话术风格：\n${scored
-          .map((d, i) => `[经验${i + 1}] ${d.title}：\n${d.content.slice(0, 800)}`)
-          .join("\n\n")}`;
+  // 中文 bigram 提取（供混合评分使用）
+  function extractGrams(text: string): Set<string> {
+    const clean = text.replace(/[，。！？、\s]/g, "");
+    const grams = new Set<string>();
+    for (let i = 0; i < clean.length - 1; i++) {
+      if (/[\u4e00-\u9fa5a-zA-Z]/.test(clean[i]) && /[\u4e00-\u9fa5a-zA-Z]/.test(clean[i + 1])) {
+        grams.add(clean.slice(i, i + 2));
       }
     }
+    return grams;
+  }
 
-    // 向量检索无果时中文 bigram 关键词兜底（不依赖分词，双字滑窗匹配）
-    if (!contextBlock) {
-      const cleanSituation = situation.replace(/[，。！？、\s]/g, "");
-      const grams = new Set<string>();
-      for (let i = 0; i < cleanSituation.length - 1; i++) {
-        if (/[\u4e00-\u9fa5a-zA-Z]/.test(cleanSituation[i]) && /[\u4e00-\u9fa5a-zA-Z]/.test(cleanSituation[i + 1])) {
-          grams.add(cleanSituation.slice(i, i + 2));
-        }
+  if (docs && docs.length > 0) {
+    // ===== 混合评分：向量语义 + 关键词命中加权（各占一半）=====
+    interface ScoredDoc {
+      id: string;
+      title: string;
+      category: string;
+      content: string;
+      vectorScore: number;
+      kwHits: number;
+      kwNorm: number;
+      score: number;
+    }
+    const situationGrams = extractGrams(situation);
+    const queryVec = await embedText(situation);
+
+    const scoredDocs: ScoredDoc[] = docs.map((d) => {
+      let vectorScore = 0;
+      if (queryVec && Array.isArray(d.embedding)) {
+        vectorScore = cosineSimilarity(queryVec, d.embedding as number[]);
       }
-      const kw = docs
-        .map((d) => {
-          const hay = `${d.title}${String(d.content).replace(/[\s\*\#]/g, "")}`;
-          let hits = 0;
-          grams.forEach((g) => { if (hay.includes(g)) hits++; });
-          return { d, hits };
-        })
-        .filter((x) => x.hits >= 3)
-        .sort((a, b) => b.hits - a.hits)
-        .slice(0, 2);
-      if (kw.length > 0) {
-        references = kw.map((x) => ({ id: x.d.id as string, title: x.d.title as string, category: x.d.category as string }));
-        contextBlock = `\n\n知识库相关参考：\n${kw.map((x) => `[${x.d.title}] ${(String(x.d.content)).slice(0, 500)}`).join("\n")}`;
-      }
+      // bigram 命中数（归一化到 0-1）
+      const hay = `${d.title}${String(d.content).replace(/[\s\*\#]/g, "")}`;
+      let hits = 0;
+      situationGrams.forEach((g) => { if (hay.includes(g)) hits++; });
+      const kwHits = hits;
+      const kwNorm = Math.min(hits / Math.max(situationGrams.size * 0.15, 5), 1);
+
+      return {
+        id: d.id as string,
+        title: d.title as string,
+        category: d.category as string,
+        content: d.content as string,
+        vectorScore,
+        kwHits,
+        kwNorm,
+        score: vectorScore * 0.5 + kwNorm * 0.5, // 混合分：向量语义 + 关键词各占一半
+      };
+    });
+
+    // 按混合分排序取 top3
+    const top3 = scoredDocs
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .filter((d) => d.score > 0.25); // 混合阈值
+
+    if (top3.length > 0) {
+      references = top3.map(({ content: _c, ...rest }) => rest);
+      contextBlock = `\n\n以下是你的知识库中匹配到的相关经验（按相关度排序），优先参考排位靠前的策略和话术风格：\n${top3
+        .map((d, i) => `[经验${i + 1}] ${d.title}：\n${d.content.slice(0, 800)}`)
+        .join("\n\n")}`;
     }
   }
 
