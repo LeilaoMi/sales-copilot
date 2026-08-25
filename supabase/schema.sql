@@ -89,6 +89,11 @@ alter table public.app_settings enable row level security;
 drop policy if exists "app_settings_service_only" on public.app_settings;
 -- 无 policy = 仅 service_role 可读写（前端 anon key 无法触碰），安全
 
+-- v8 新增：知识库生态字段
+alter table public.knowledge_docs add column if not exists industry_tags text[] default '{}';
+alter table public.knowledge_docs add column if not exists used_count int not null default 0;
+create index if not exists idx_knowledge_used_count on public.knowledge_docs(used_count desc);
+
 -- ============ RLS 安全策略 ============
 alter table public.clients enable row level security;
 alter table public.interactions enable row level security;

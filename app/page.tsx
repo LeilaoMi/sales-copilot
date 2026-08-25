@@ -121,6 +121,16 @@ export default function Home() {
     } catch {}
   }, []);
 
+  // 贡献者排行榜
+  const [leaderboard, setLeaderboard] = useState<{contributor:string;docs:number;used:number}[]>([]);
+  async function toggleLeaderboard() {
+    if (leaderboard.length > 0) { setLeaderboard([]); return; }
+    try {
+      const res = await apiFetch("/api/knowledge/leaderboard");
+      if (res.ok) setLeaderboard(await res.json());
+    } catch {}
+  }
+
   const loadDashboard = useCallback(async () => {
     setDashLoading(true);
     try {
@@ -681,7 +691,24 @@ export default function Home() {
             </div>
           </div>
 
-          <input className={`${inputCls} mb-2`} placeholder="搜索全社区知识库" value={kQ} onChange={e=>setKQ(e.target.value)}/>
+                    <input className={`${inputCls} mb-2`} placeholder="搜索全社区知识库" value={kQ} onChange={e=>setKQ(e.target.value)}/>
+
+          {/* 贡献排行榜入口 */}
+          <button onClick={toggleLeaderboard} className="w-full text-xs text-slate-400 hover:text-indigo-500 mb-2 transition-colors">
+            🏆 社区贡献榜 {leaderboard.length>0 ? "（收起）" : "（点击展开）"}
+          </button>
+          {leaderboard.length>0 && (
+            <div className={`${card} p-3 mb-3 space-y-1.5`}>
+              {leaderboard.map((l,i)=>(
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  <span className={`w-5 h-5 rounded-full text-xs flex items-center justify-center shrink-0 ${i===0?"bg-amber-100 text-amber-600":i===1?"bg-slate-200 text-slate-600":"bg-orange-50 text-orange-500"}`}>{i+1}</span>
+                  <span className="flex-1 font-medium text-slate-700">{l.contributor}</span>
+                  <span className="text-xs text-slate-400">{l.docs} 条 · 被引用 {l.used} 次</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="space-y-2">
             {docs.length===0 && <div className="text-slate-400 text-center py-8 text-sm">暂无匹配条目</div>}
             {docs.map(d=>(
@@ -692,6 +719,10 @@ export default function Home() {
                       {CAT_LABELS[d.category]||d.category}
                     </span>
                     <span className="font-semibold text-slate-800">{d.title}</span>
+                    {(d.industry_tags as string[])?.length>0 && (
+                      <span className="text-[10px] text-teal-600 bg-teal-50 rounded px-1 py-0.5 ml-1">{(d.industry_tags as string[]).join("/")}</span>
+                    )}
+                    {(d.used_count||0)>0 && <span className="text-[10px] text-orange-400 ml-1">🔥{d.used_count}</span>}
                   </div>
                   <div className="flex gap-2 shrink-0 ml-2" onClick={e=>e.stopPropagation()}>
                     <button onClick={()=>editDoc(d)} className="text-xs text-indigo-500 hover:text-indigo-700">改</button>

@@ -117,6 +117,16 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
           .join("\n\n")}`;
       }
     }
+
+    // 贡献激励：命中的知识条目 used_count +1（失败静默）
+    if (references.length > 0) {
+      for (const r of references) {
+        try {
+          const { data: cur } = await supabase.from("knowledge_docs").select("used_count").eq("id", r.id).single();
+          await supabase.from("knowledge_docs").update({ used_count: (cur?.used_count || 0) + 1 }).eq("id", r.id);
+        } catch {}
+      }
+    }
   }
 
   // 2. 生成定制话术
