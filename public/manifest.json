@@ -1,0 +1,17 @@
+{
+  "name": "销售情报官",
+  "short_name": "情报官",
+  "description": "AI 驱动的销售作战助手",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
