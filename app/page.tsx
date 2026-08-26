@@ -848,7 +848,7 @@ const KNOWN_PROVIDERS: Record<string,{label:string;baseURL:string;defaultModel:s
   openai:{label:"OpenAI",baseURL:"https://api.openai.com/v1",defaultModel:"gpt-4o-mini"},
 };
 
-function LlmSettingsPanel({cfg,onSave}:{cfg:{provider:string;model:string;hasKey:boolean};onSave:(p:string,k:string,m?:string)=>Promise<void>}) {
+function LlmSettingsPanel({cfg,onSave}:{cfg:{provider:string;model:string;hasKey:boolean;history?:{provider:string;model:string;hasKey:boolean}[]};onSave:(p:string,k:string,m?:string)=>Promise<void>}) {
   const isCustom=!KNOWN_PROVIDERS[cfg.provider];
   const [mode,setMode]=useState<"preset"|"custom">(isCustom?"custom":"preset");
   const [provider,setProvider]=useState(cfg.provider);
@@ -948,6 +948,34 @@ const [msg,setMsg]=useState<{ok:boolean;text:string} | null>();
         {saving?"保存中…":"保存并立即生效"}
       </button>
       {msg&&<div className={`text-xs px-3 py-2 rounded-lg ${msg.ok?"bg-emerald-50 text-emerald-700":"bg-red-50 text-red-600"}`}>{msg.text}</div>}
+
+      {/* 历史配置一键切换 */}
+      {(cfg.history?.length||0)>1 && (
+        <div className="pt-2 border-t border-slate-100">
+          <div className="text-xs text-slate-400 mb-1.5">🕘 历史配置（点击快速切回）</div>
+          <div className="space-y-1.5">
+            {cfg.history!.filter(h=>!(h.provider===cfg.provider&&(h.model||"")===(cfg.model||""))).slice(0,5).map((h,i)=>(
+              <button key={i}
+                onClick={()=>{
+                  setMode(h.provider.startsWith("custom:")?"custom":"preset");
+                  if(h.provider.startsWith("custom:")){
+                    const rest=h.provider.split("custom:")[1];
+                    const [n,b]=rest.split("|");
+                    setCustomName(n);setCustomBaseURL(b);
+                  }else{setProvider(h.provider);}
+                  setModel(h.model||"");
+                  setMsg({ok:true,text:`已载入 ${h.provider.startsWith("custom:")?h.provider.split("|")[0]:KNOWN_PROVIDERS[h.provider]?.label||h.provider} 的配置，填 Key 后保存即可切换`});
+                }}
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors text-left">
+                <span className="text-xs font-medium text-slate-700 truncate">
+                  {h.provider.startsWith("custom:")?`${h.provider.split("custom:")[1].split("|")[0]}（自定义）`:KNOWN_PROVIDERS[h.provider]?.label||h.provider}
+                </span>
+                <span className="text-[11px] text-slate-400 shrink-0 ml-2">{h.model||"默认"} · {h.hasKey?"有Key":"无Key"}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

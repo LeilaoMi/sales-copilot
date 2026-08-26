@@ -26,6 +26,14 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
 
   if (!clientId) return fail("客户ID初始化失败", 500);
 
+  // 自愈：清理该用户超过10分钟仍卡在 generating 的僵尸记录
+  await supabase
+    .from("clients")
+    .update({ status: "failed" })
+    .eq("user_id", userId)
+    .eq("status", "generating")
+    .lt("created_at", new Date(Date.now() - 10 * 60000).toISOString());
+
   // 标记生成中
   await supabase.from("clients").update({ status: "generating" }).eq("id", clientId).eq("user_id", userId);
 

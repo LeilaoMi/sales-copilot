@@ -53,3 +53,27 @@ export async function saveLlmConfig(provider: string, apiKey: string, model?: st
   }, { onConflict: "key" });
   if (error) throw new Error(`保存配置失败: ${error.message}`);
 }
+// ===== 配置历史：保存用过的组合，支持一键切换 =====
+export async function listLlmHistory(): Promise<{provider:string;model:string;hasKey:boolean;updated_at:string}[]> {
+  try {
+    const admin = getAdmin();
+    const { data } = await admin.from("app_settings").select("value,updated_at").eq("key","llm_history").single();
+    if (!data?.value) return [];
+    const arr = typeof data.value === "string" ? JSON.parse(data.value) : data.value;
+    return Array.isArray(arr) ? arr.slice(0, 10) : [];
+  } catch { return []; }
+}
+
+export async function pushLlmHistory(cfg: { provider:string; model?:string; apiKey?:string }) {
+  const admin = getAdmin();
+  // 读旧历史
+  let history: any[] = [];
+  try {
+    const { data } = await admin.from("app_settings").select("value").eq("key","llm_history").single();
+    history = data?.value ? (typeof data.value === "string" ? JSON.parse(data.value) : data.value) : [];
+  } catch {}
+  // 去重（同provider+model），新的放最前
+  history = history.filter((h:any) => !(h.provider===cfg.provider && h.model===cfg.model));
+  history.unshift({ provider:cfg.provider, model:cfg.model||"", hasKey:Boolean(cfg.apiKey), apiKey:cfg.apiKey||"", updated_at:new Date().toISOString() });
+  await admin.from("app_settings").upsert({ key:"llm_history", value: JSON.stringify(history.slice(0,10)) }, { onConflict:"key" });
+}

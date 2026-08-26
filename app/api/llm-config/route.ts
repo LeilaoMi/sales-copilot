@@ -1,5 +1,5 @@
 import { withAuth, fail, ok } from "@/lib/api-utils";
-import { getLlmConfig, saveLlmConfig } from "@/lib/llm-config";
+import { getLlmConfig, saveLlmConfig, listLlmHistory, pushLlmHistory } from "@/lib/llm-config";
 
 export const runtime = "nodejs";
 
@@ -8,11 +8,13 @@ export const GET = withAuth(async (_req, { userId }) => {
   void userId;
   try {
     const cfg = await getLlmConfig();
+    const history = await listLlmHistory().catch(() => []);
     return ok({
       provider: cfg.provider,
       model: cfg.model || "",
       hasKey: Boolean(cfg.apiKey),
       source: cfg.source,
+      history,
     });
   } catch (e: any) {
     return fail(e.message, 500);
@@ -34,6 +36,11 @@ export const POST = withAuth(async (req, { userId }) => {
 
   try {
     await saveLlmConfig(String(body.provider), String(body.apiKey || ""), body.model ? String(body.model) : undefined);
+    await pushLlmHistory({
+      provider: String(body.provider),
+      model: body.model ? String(body.model) : undefined,
+      apiKey: body.apiKey ? String(body.apiKey) : undefined,
+    }).catch(() => {});
     return ok({ saved: true });
   } catch (e: any) {
     return fail(e.message, 500);
