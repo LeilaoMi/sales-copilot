@@ -857,18 +857,45 @@ function LlmSettingsPanel({cfg,onSave}:{cfg:{provider:string;model:string;hasKey
   const [customBaseURL,setCustomBaseURL]=useState("");
   const [customName,setCustomName]=useState("");
   const [saving,setSaving]=useState(false);
-  const [msg,setMsg]=useState("");
+const [msg,setMsg]=useState<{ok:boolean;text:string} | null>();
+  const [models,setModels]=useState<string[]>([]);
+  const [fetchingModels,setFetchingModels]=useState(false);
+
+  // 拉取模型列表
+  async function fetchModels(){
+    setFetchingModels(true);setModels([]);setMsg(null);
+    try{
+      let payload:any={};
+      if(mode==="custom"){
+        if(!customBaseURL.trim())throw new Error("先填 API 地址再拉取模型");
+        payload={baseURL:customBaseURL.trim(),apiKey};
+      }else{
+        payload={provider};
+      }
+      const res=await fetch("/api/llm-models",{
+        method:"POST",
+        headers:{"Content-Type":"application/json",Authorization:`Bearer ${(await (await getSupabaseBrowser()).auth.getSession()).data.session!.access_token}`},
+        body:JSON.stringify(payload),
+      });
+      const j=await res.json();
+      if(!res.ok)throw new Error(j.error||"拉取失败");
+      setModels(j.models||[]);
+      setMsg({ok:true,text:`✓ 连接正常，发现 ${(j.models||[]).length} 个模型`});
+    }catch(e:any){setMsg({ok:false,text:e.message});}
+    finally{setFetchingModels(false);}
+  }
 
   async function handleSave(){
-    setSaving(true);setMsg("");
+    setSaving(true);setMsg(null);
     try{
-      if(mode==="preset"){await onSave(provider,apiKey);}
+      if(mode==="preset"){await onSave(provider,apiKey,model.trim()||undefined);}
       else{
         if(!customBaseURL.trim()||!customName.trim())throw new Error("自定义接口需填写名称和 API 地址");
         await onSave(`custom:${customName.trim()}|${customBaseURL.trim()}`,apiKey,model.trim()||undefined);
       }
-      setMsg("✓ 已生效，立即启用新模型");setApiKey("");
-    }catch(e:any){setMsg(e.message);}finally{setSaving(false);}
+      setMsg({ok:true,text:"✓ 已保存并生效"});
+      setApiKey("");
+    }catch(e:any){setMsg({ok:false,text:e.message});}finally{setSaving(false);}
   }
 
   const inputCls="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white";
@@ -879,29 +906,48 @@ function LlmSettingsPanel({cfg,onSave}:{cfg:{provider:string;model:string;hasKey
         当前：<b>{isCustom?`${cfg.provider.split("|")[0]}（自定义）`:KNOWN_PROVIDERS[cfg.provider]?.label||cfg.provider}</b> · 模型 <b>{cfg.model||"(默认)"}</b> · Key {cfg.hasKey?"已配置 ✓":"未配置 ✗"}
       </div>
       <div className="flex bg-slate-100 rounded-lg p-0.5">
-        <button onClick={()=>setMode("preset")} className={`flex-1 py-1.5 rounded-md text-xs ${mode==="preset"?"bg-white shadow font-medium":"text-slate-500"}`}>常用服务商</button>
-        <button onClick={()=>setMode("custom")} className={`flex-1 py-1.5 rounded-md text-xs ${mode==="custom"?"bg-white shadow font-medium":"text-slate-500"}`}>自定义接口</button>
+        <button onClick={()=>{setMode("preset");setModels([]);}} className={`flex-1 py-1.5 rounded-md text-xs ${mode==="preset"?"bg-white shadow font-medium":"text-slate-500"}`}>常用服务商</button>
+        <button onClick={()=>{setMode("custom");setModels([]);}} className={`flex-1 py-1.5 rounded-md text-xs ${mode==="custom"?"bg-white shadow font-medium":"text-slate-500"}`}>自定义接口</button>
       </div>
       {mode==="preset"?(
         <>
           <select className={inputCls} value={provider} onChange={e=>setProvider(e.target.value)}>
-            {Object.entries(KNOWN_PROVIDERS).map(([k,v])=><option key={k} value={k}>{v.label}（默认: {v.defaultModel}）</option>)}
+            {Object.entries(KNOWN_PROVIDERS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
-          <input type="password" className={inputCls} placeholder="新 API Key（留空沿用现有）" value={apiKey} onChange={e=>setApiKey(e.target.value)}/>
+          <input type="password" className={inputCls} placeholder="API Key（留空沿用现有）" value={apiKey} onChange={e=>setApiKey(e.target.value)}/>
+          <button onClick={fetchModels} disabled={fetchingModels}
+            className="w-full border border-indigo-300 text-indigo-600 rounded-lg py-2 text-xs font-medium hover:bg-indigo-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors">
+            {fetchingModels?"连接中…":"🔌 测试连接 & 拉取模型列表"}
+          </button>
+          {models.length>0?(
+            <select className={inputCls} value={model} onChange={e=>setModel(e.target.value)}>
+              <option value="">使用该服务商默认模型</option>
+              {models.map(m=><option key={m} value={m}>{m}</option>)}
+            </select>
+          ):<input className={inputCls} placeholder="模型名（可选，默认用服务商推荐）" value={model} onChange={e=>setModel(e.target.value)}/>}
         </>
       ):(
         <>
           <input className={inputCls} placeholder="接口名称" value={customName} onChange={e=>setCustomName(e.target.value)}/>
           <input className={inputCls} placeholder="API Base URL（https://xxx.com/v1）" value={customBaseURL} onChange={e=>setCustomBaseURL(e.target.value)}/>
-          <input className={inputCls} placeholder="模型名（可选）" value={model} onChange={e=>setModel(e.target.value)}/>
           <input type="password" className={inputCls} placeholder="API Key" value={apiKey} onChange={e=>setApiKey(e.target.value)}/>
-          <p className="text-xs text-slate-400">兼容 OpenAI Chat Completions 协议的任意服务</p>
+          <button onClick={fetchModels} disabled={fetchingModels||!customBaseURL.trim()}
+            className="w-full border border-indigo-300 text-indigo-600 rounded-lg py-2 text-xs font-medium hover:bg-indigo-50 disabled:bg-slate-100 disabled:text-slate-400 transition-colors">
+            {fetchingModels?"连接中…":"🔌 测试连接 & 拉取模型列表"}
+          </button>
+          {models.length>0 && (
+            <select className={inputCls} value={model} onChange={e=>setModel(e.target.value)}>
+              {models.map(m=><option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
+          {!models.length && <input className={inputCls} placeholder="模型名（或点上方按钮自动获取）" value={model} onChange={e=>setModel(e.target.value)}/>}
+          <p className="text-xs text-slate-400">兼容 OpenAI Chat Completions 协议的任意服务；免费接口建议选带 free 后缀且在列表里的模型</p>
         </>
       )}
       <button onClick={handleSave} disabled={saving} className="w-full bg-indigo-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-indigo-700 disabled:bg-slate-300 transition-colors">
         {saving?"保存中…":"保存并立即生效"}
       </button>
-      {msg&&<div className={`text-xs ${msg.startsWith("✓")?"text-emerald-600":"text-red-500"}`}>{msg}</div>}
+      {msg&&<div className={`text-xs px-3 py-2 rounded-lg ${msg.ok?"bg-emerald-50 text-emerald-700":"bg-red-50 text-red-600"}`}>{msg.text}</div>}
     </div>
   );
 }
