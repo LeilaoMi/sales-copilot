@@ -7,6 +7,14 @@ export const runtime = "nodejs";
 export const GET = withAuth(async (req, { supabase, userId }) => {
   const q = new URL(req.url).searchParams.get("q")?.trim();
 
+  // 自愈：进入列表时将超时 generating 标记为 failed（解决前端中断导致的孤儿）
+  await supabase
+    .from("clients")
+    .update({ status: "failed" })
+    .eq("user_id", userId)
+    .eq("status", "generating")
+    .lt("created_at", new Date(Date.now() - 3 * 60 * 1000).toISOString());
+
   let query = supabase
     .from("clients")
     .select("id,name,title,company,industry,stage,status,profile,next_follow_up,note,created_at")

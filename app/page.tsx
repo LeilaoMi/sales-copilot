@@ -205,7 +205,13 @@ export default function Home() {
       }
       loadHistory(); loadDashboard();
     } catch (e: any) {
-      if (e.name !== "AbortError") setError(e.message || "分析失败");
+      if (e.name === "AbortError") {
+        // 用户主动取消，不提示
+      } else if (String(e.message||"").includes("Failed to fetch")) {
+        setError("网络连接失败，请检查网络/VPN后重试。表单内容已保留，点击“生成作战简报”重试即可。");
+      } else {
+        setError(e.message || "分析失败，请重试");
+      }
     } finally { setLoading(false); }
   }
 
@@ -378,6 +384,9 @@ export default function Home() {
     if (s === "generating") return <span className="inline-flex items-center rounded-full bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20 px-2 py-0.5 text-xs font-medium">生成中</span>;
     if (s === "failed") return <span className="inline-flex items-center rounded-full bg-slate-100 text-slate-500 ring-1 ring-inset ring-slate-500/20 px-2 py-0.5 text-xs font-medium">失败</span>;
     return null;
+  }
+  function isGeneratingStale(created_at: string) {
+    return Date.now() - new Date(created_at).getTime() > 3 * 60 * 1000;
   }
 
   return (
@@ -566,6 +575,7 @@ export default function Home() {
                 </div>
                 {c.next_follow_up && <div className="text-xs text-orange-500 mt-1.5">⏰ 跟进: {new Date(c.next_follow_up).toLocaleString("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}</div>}
                 <div className="text-xs text-slate-400 mt-1">{[c.title,c.industry].filter(Boolean).join(" · ")||"—"} · 录入于 {new Date(c.created_at).toLocaleDateString("zh-CN")}</div>
+                {c.status==="generating" && isGeneratingStale(c.created_at) && <div className="text-xs text-amber-600 mt-1">生成超时，请进入详情重试</div>}
               </button>
             ))}
           </div>
@@ -586,9 +596,9 @@ export default function Home() {
               <button onClick={()=>deleteClient(detail.id)} className="text-xs text-red-300 hover:text-red-500 transition-colors">删除</button>
             </div>
             {detail.note && <div className="text-sm mt-3 p-2.5 bg-amber-50/60 border border-amber-100/60 rounded-lg text-slate-700">📌 {detail.note}</div>}
-            {detail.status==="failed" && (
+            {(detail.status==="failed" || (detail.status==="generating" && isGeneratingStale(detail.created_at))) && (
               <button onClick={()=>retryFailed(detail)} className="mt-3 w-full text-sm bg-orange-50 text-orange-700 rounded-lg py-2.5 font-medium hover:bg-orange-100 transition-colors">
-                简报生成失败，点击重试
+                {detail.status==="failed" ? "简报生成失败，点击重试" : "生成超时，点击重试"}
               </button>
             )}
             <div className="flex gap-1.5 mt-3 flex-wrap">

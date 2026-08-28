@@ -33,7 +33,7 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
     .eq("user_id", userId)
     .eq("status", "generating")
     .neq("id", clientId)
-    .lt("created_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
+    .lt("created_at", new Date(Date.now() - 3 * 60 * 1000).toISOString());
 
   // 标记生成中
   await supabase.from("clients").update({ status: "generating" }).eq("id", clientId).eq("user_id", userId);
@@ -47,7 +47,13 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
   let hadError = false;
   let errMsg = "";
   const encoder = new TextEncoder();
+  let streamCancelled = false;
   const stream = new ReadableStream({
+    async cancel() {
+      streamCancelled = true;
+      // 前端中断时立即标记失败，避免孤儿 generating
+      await supabase.from("clients").update({ status: "failed" }).eq("id", clientId!).eq("user_id", userId);
+    },
     async start(controller) {
       try {
         for await (const chunk of streamChat([{ role: "user", content: prompt }])) {
@@ -64,8 +70,9 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
         }
         try { controller.enqueue(encoder.encode(`\n\n[错误] ${errMsg}`)); } catch {}
       } finally {
-        try { controller.close(); } catch {}
-        // P1-5 修复：若报告被截断（<200字且非正常结束），一律标记 failed，避免半截入库
+        try { if (!streamCancelled) controller.close(); } catch {}
+        // P1-5 修复：若报告被截断（<200字且非正常结束）或已取消，一律标记 failed，避免半截入库
+        if (streamCancelled) hadError = true;
         const isTruncated = !hadError && fullReport.trim().length > 0 && fullReport.trim().length < 200;
         const patch = hadError || isTruncated
           ? { status: "failed" as const }
