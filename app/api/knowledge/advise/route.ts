@@ -66,12 +66,11 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
     const situationGrams = extractGrams(situation);
     const queryVec = await embedText(situation);
 
-        const scoredDocs: ScoredDoc[] = docs.map((d) => {
+    const scoredDocs: ScoredDoc[] = docs.map((d) => {
       let vectorScore = 0;
       if (queryVec && Array.isArray(d.embedding)) {
         vectorScore = cosineSimilarity(queryVec, d.embedding as number[]);
       }
-      // bigram 命中：标题双倍权重（标题是条目的核心信号）
       const titleClean = String(d.title).replace(/[\s\*\#]/g, "");
       const bodyClean = String(d.content).replace(/[\s\*\#]/g, "");
       let titleHits = 0;
@@ -81,9 +80,7 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
         else if (bodyClean.includes(g)) bodyHits++;
       });
       const kwHits = titleHits * 2 + bodyHits;
-      // 归一化：命中数达到「情境gram数的20%」或绝对值6即视为满分
       const kwNorm = Math.min(kwHits / Math.max(situationGrams.size * 0.2, 6), 1);
-
       return {
         id: d.id as string,
         title: d.title as string,
@@ -92,27 +89,32 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
         vectorScore,
         kwHits,
         kwNorm,
-        score: vectorScore * 0.5 + kwNorm * 0.5, // 混合分：向量语义 + 关键词各占一半
+        score: vectorScore * 0.5 + kwNorm * 0.5,
       };
     });
 
-// 向量检索无果时中文 bigram 关键词兜底（不依赖分词，双字滑窗匹配）
+    // P1-4 修复：混合检索真正生效 — 按综合分排序取 Top3
+    const top3 = [...scoredDocs]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .filter((d) => d.score > 0.25);
+
+    if (top3.length > 0) {
+      references = top3.map(({ content: _c, ...rest }) => rest);
+      contextBlock = `\n\n以下是你的知识库中匹配到的相关经验（按相关度排序），优先参考排位靠前的策略和话术风格：\n${top3
+        .map((d, i) => `[经验${i + 1}] ${d.title}：\n${d.content.slice(0, 800)}`)
+        .join("\n\n")}`;
+    }
+
+    // 混合检索无果时，中文 bigram 兜底（阈值更宽松）
     if (references.length === 0) {
-      const cleanSituation = situation.replace(/[，。！？、\s]/g, "");
-      const grams = new Set<string>();
-      for (let i = 0; i < cleanSituation.length - 1; i++) {
-        if (/[\u4e00-\u9fa5a-zA-Z0-9]/.test(cleanSituation[i]) && /[\u4e00-\u9fa5a-zA-Z0-9]/.test(cleanSituation[i + 1])) {
-          grams.add(cleanSituation.slice(i, i + 2));
-        }
-      }
-      const kw = scoredDocs
-        .map((x) => ({ ...x }))
-        .filter((x) => x.kwHits >= 3)
+      const kwFallback = [...scoredDocs]
+        .filter((x) => x.kwHits >= 2)
         .sort((a, b) => b.kwHits - a.kwHits)
         .slice(0, 2);
-      if (kw.length > 0) {
-        references = kw.map((x) => ({ id: x.id, title: x.title, category: x.category, score: x.score }));
-        contextBlock = `\n\n知识库相关参考（按命中度排序）：\n${kw
+      if (kwFallback.length > 0) {
+        references = kwFallback.map((x) => ({ id: x.id, title: x.title, category: x.category, score: x.score }));
+        contextBlock = `\n\n知识库相关参考（关键词匹配）：\n${kwFallback
           .map((x, i) => `[参考${i + 1}] ${x.title}：\n${String(x.content).slice(0, 600)}`)
           .join("\n\n")}`;
       }

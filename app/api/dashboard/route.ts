@@ -10,6 +10,7 @@ export const GET = withAuth(async (_req, { supabase, userId }) => {
     supabase
       .from("interactions")
       .select("objections,created_at,client_id,clients!inner(user_id)")
+      .eq("clients.user_id", userId)
       .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString()),
   ]);
 

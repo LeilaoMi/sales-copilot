@@ -26,13 +26,14 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
 
   if (!clientId) return fail("客户ID初始化失败", 500);
 
-  // 自愈：清理该用户超过10分钟仍卡在 generating 的僵尸记录
+  // 自愈：清理该用户超过 10 分钟仍卡在 generating 的僵尸记录，但排除本次任务
   await supabase
     .from("clients")
     .update({ status: "failed" })
     .eq("user_id", userId)
     .eq("status", "generating")
-    .lt("created_at", new Date(Date.now() - 10 * 60000).toISOString());
+    .neq("id", clientId)
+    .lt("created_at", new Date(Date.now() - 10 * 60 * 1000).toISOString());
 
   // 标记生成中
   await supabase.from("clients").update({ status: "generating" }).eq("id", clientId).eq("user_id", userId);
@@ -55,12 +56,18 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
         }
       } catch (e: any) {
         hadError = true;
-        errMsg = e.message || "模型调用失败";
-        controller.enqueue(encoder.encode(`\n\n[错误] ${errMsg}`));
+        // 区分用户主动取消与模型错误
+        if (e?.name === "AbortError" || String(e?.message || "").includes("aborted")) {
+          errMsg = "请求已取消";
+        } else {
+          errMsg = e.message || "模型调用失败";
+        }
+        try { controller.enqueue(encoder.encode(`\n\n[错误] ${errMsg}`)); } catch {}
       } finally {
-        controller.close();
-        // 流结束后统一落库：成功存报告，失败标记 failed
-        const patch = hadError
+        try { controller.close(); } catch {}
+        // P1-5 修复：若报告被截断（<200字且非正常结束），一律标记 failed，避免半截入库
+        const isTruncated = !hadError && fullReport.trim().length > 0 && fullReport.trim().length < 200;
+        const patch = hadError || isTruncated
           ? { status: "failed" as const }
           : fullReport.trim()
             ? { profile: fullReport, status: "ready" as const }

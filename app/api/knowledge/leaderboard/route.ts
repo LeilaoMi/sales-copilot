@@ -20,11 +20,17 @@ export const GET = withAuth(async (_req, { supabase, userId }) => {
     agg.set(d.user_id, cur);
   }
 
-  // 贡献者展示名（邮箱前缀）
-  const { data: users } = await supabase.auth.admin.listUsers();
+  // 贡献者展示名（分页拉取，突破 50 条限制）
   const nameMap = new Map<string, string>();
-  for (const u of users?.users || []) {
-    nameMap.set(u.id, (u.email || "匿名").split("@")[0]);
+  let page = 1;
+  while (true) {
+    const { data: users } = await supabase.auth.admin.listUsers({ page, perPage: 1000 } as any);
+    const list = (users as any)?.users || users || [];
+    if (!Array.isArray(list) || list.length === 0) break;
+    for (const u of list) nameMap.set(u.id, (u.email || "匿名").split("@")[0]);
+    if (list.length < 1000) break;
+    page++;
+    if (page > 10) break; // 安全上限
   }
 
   const board = Array.from(agg.entries())

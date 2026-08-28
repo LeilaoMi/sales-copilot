@@ -2,7 +2,6 @@ import { NextRequest } from "next/server";
 import { withAuth, fail, ok } from "@/lib/api-utils";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
 
 // POST /api/weekly-report - AI 周报生成
 // 汇总本周客户动态、交互、异议，输出复盘报告

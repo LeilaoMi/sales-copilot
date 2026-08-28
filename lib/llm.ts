@@ -30,8 +30,7 @@ function resolveProvider(cfg: LlmRuntimeConfig): ResolvedProvider | null {
   return {
     ...p,
     name: cfg.provider,
-    // 空Key时回落到环境变量（支持"留空沿用现有"的UI承诺）
-    apiKey: (cfg.apiKey && cfg.apiKey.trim()) ? cfg.apiKey : (process.env[`${cfg.provider.toUpperCase()}_API_KEY`] || ""),
+    apiKey: cfg.apiKey ?? ((cfg.source !== "database" ? process.env[`${cfg.provider.toUpperCase()}_API_KEY`] : undefined) || ""),
   };
 }
 

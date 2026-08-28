@@ -3,12 +3,11 @@ import { getLlmConfig, saveLlmConfig, listLlmHistory, pushLlmHistory } from "@/l
 
 export const runtime = "nodejs";
 
-// GET /api/llm-config - 查看当前 AI 接入配置（Key 不回传明文）
+// GET /api/llm-config - 查看当前 AI 接入配置（Key 不回传明文，附带历史列表）
 export const GET = withAuth(async (_req, { userId }) => {
   void userId;
   try {
-    const cfg = await getLlmConfig();
-    const history = await listLlmHistory().catch(() => []);
+    const [cfg, history] = await Promise.all([getLlmConfig(), listLlmHistory().catch(() => [])]);
     return ok({
       provider: cfg.provider,
       model: cfg.model || "",
@@ -36,11 +35,8 @@ export const POST = withAuth(async (req, { userId }) => {
 
   try {
     await saveLlmConfig(String(body.provider), String(body.apiKey || ""), body.model ? String(body.model) : undefined);
-    await pushLlmHistory({
-      provider: String(body.provider),
-      model: body.model ? String(body.model) : undefined,
-      apiKey: body.apiKey ? String(body.apiKey) : undefined,
-    }).catch(() => {});
+    // 历史仅存 provider+model，不存明文 Key
+    await pushLlmHistory(String(body.provider), body.model ? String(body.model) : undefined).catch(() => {});
     return ok({ saved: true });
   } catch (e: any) {
     return fail(e.message, 500);

@@ -40,17 +40,18 @@ export const PATCH = withAuth(async (req, { supabase, userId }) => {
   return ok(data);
 });
 
-// DELETE /api/knowledge/[id] - 仅贡献者本人可删
+// DELETE /api/knowledge/[id] - 仅贡献者本人可删（P0 修复：应用层补 user_id 过滤，RLS 绕过时不失效）
 export const DELETE = withAuth(async (req, { supabase, userId }) => {
-  void userId;
   const id = req.url.split("/api/knowledge/")[1]?.split("?")[0]?.replace(/\/view$/, "") ?? "";
   if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return fail("无效的ID", 400);
 
-  // RLS knowledge_delete_own 已限制为贡献者本人，这里直接删
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("knowledge_docs")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("id");
   if (error) return fail(error.message, 500);
+  if (!data || data.length === 0) return fail("无权限或条目不存在", 404);
   return ok({ deleted: true });
 });
