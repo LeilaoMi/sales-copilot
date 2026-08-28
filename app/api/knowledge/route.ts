@@ -19,7 +19,7 @@ export const GET = withAuth(async (req, { supabase, userId }) => {
 
   let query = supabase
     .from("knowledge_docs")
-    .select("id,title,category,content,created_at,industry_tags,used_count")
+    .select("id,title,category,content,created_at,industry_tags,used_count,user_id")
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 

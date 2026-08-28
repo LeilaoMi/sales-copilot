@@ -36,7 +36,12 @@ export default function LoginPage() {
         }
       }
     } catch (e: any) {
-      setError(e.message || "操作失败");
+      const msg = e.message || "操作失败";
+      if (msg.includes("Email not confirmed") || msg.includes("email_not_confirmed") || msg.includes("邮件")) {
+        setError("邮箱未确认：请先查收确认邮件，或联系管理员在 Supabase Dashboard → Authentication → Providers → Email → 关闭 Confirm email");
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -64,7 +69,7 @@ export default function LoginPage() {
 
           {sent ? (
             <div className="text-sm text-green-700 bg-green-50 rounded-lg p-3">
-              确认邮件已发送到你的邮箱，请查收后返回登录。
+              确认邮件已发送到你的邮箱，请查收后返回登录。<br/>若你是管理员，建议到 Supabase → Authentication → Providers → Email 关闭 Confirm email，实现免邮箱验证。
             </div>
           ) : (
             <form onSubmit={submit} className="space-y-3">

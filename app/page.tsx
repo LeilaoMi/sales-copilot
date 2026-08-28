@@ -123,6 +123,7 @@ export default function Home() {
 
   // 贡献者排行榜
   const [leaderboard, setLeaderboard] = useState<{contributor:string;docs:number;used:number}[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   async function toggleLeaderboard() {
     if (leaderboard.length > 0) { setLeaderboard([]); return; }
     try {
@@ -140,6 +141,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => { if (authChecked) { loadHistory(); loadDashboard(); } }, [authChecked, loadHistory, loadDashboard]);
+  useEffect(() => {
+    if (!authChecked) return;
+    getSupabaseBrowser().then(s => s.auth.getUser()).then(({data}) => setCurrentUserId(data.user?.id || null)).catch(()=>{});
+  }, [authChecked]);
   useEffect(() => { if (authChecked && tab === "history") loadHistory(searchQ); }, [searchQ, authChecked, tab, loadHistory]);
   useEffect(() => { if (authChecked && tab === "knowledge") loadKnowledge(kQ); }, [kQ, authChecked, tab, loadKnowledge]);
 
@@ -159,6 +164,7 @@ export default function Home() {
     if (!payload.name?.trim()) { setError("客户姓名必填"); return; }
     setLoading(true); setError(""); setReport("");
     abortRef.current = new AbortController();
+    let clientIdForPoll: string | null = retryClientId || null;
     try {
       const supabase = await getSupabaseBrowser();
       const { data: { session } } = await supabase.auth.getSession();
@@ -173,6 +179,8 @@ export default function Home() {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || `服务端错误 ${res.status}`);
       }
+      // 捕获服务端返回的 X-Client-Id 用于轮询落库状态
+      clientIdForPoll = res.headers.get("X-Client-Id") || retryClientId || null;
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
       let full = "";
@@ -181,6 +189,19 @@ export default function Home() {
         if (done) break;
         full += decoder.decode(value, { stream: true });
         setReport(full);
+      }
+      // 轮询等待服务端落库（最多约 10 秒），解决 generating 假死
+      if (clientIdForPoll) {
+        for (let i = 0; i < 6; i++) {
+          await new Promise(r => setTimeout(r, 1500));
+          try {
+            const check = await apiFetch(`/api/clients/${clientIdForPoll}`);
+            if (check.ok) {
+              const cj = await check.json();
+              if (cj.status !== "generating") break;
+            }
+          } catch {}
+        }
       }
       loadHistory(); loadDashboard();
     } catch (e: any) {
@@ -214,8 +235,21 @@ export default function Home() {
   }
 
   async function openDetail(id: string) {
-    const res = await apiFetch(`/api/clients/${id}`);
-    if (res.ok) { setDetail(await res.json()); setTab("history"); }
+    try {
+      const res = await apiFetch(`/api/clients/${id}`);
+      if (!res.ok) {
+        const j = await res.json().catch(()=>({}));
+        setError(j.error || "客户不存在或无权限");
+        return;
+      }
+      const data = await res.json();
+      setDetail(data);
+      setTab("history");
+      // 确保详情可见，滚动到顶部
+      setTimeout(()=> window.scrollTo({top:0, behavior:"smooth"}), 50);
+    } catch (e:any) {
+      setError(e.message || "加载详情失败");
+    }
   }
 
   async function updateStage(id: string, stage: string) {
@@ -522,7 +556,7 @@ export default function Home() {
           <div className="space-y-2">
             {clients.length===0 && <div className="text-slate-400 text-center py-12">{searchQ?"无匹配结果":"暂无客户档案"}</div>}
             {clients.map(c=>(
-              <button key={c.id} onClick={()=>openDetail(c.id)} className={`w-full text-left ${card} p-4 active:bg-slate-50 transition-colors`}>
+              <button type="button" key={c.id} onClick={()=>openDetail(c.id)} className={`w-full text-left ${card} p-4 active:bg-slate-50 transition-colors`}>
                 <div className="flex justify-between items-center gap-2">
                   <span className="font-semibold text-slate-900 truncate">{c.name}{c.company?<span className="font-normal text-slate-400"> · {c.company}</span>:null}</span>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -538,10 +572,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* 客户详情 */}
-      {tab === "history" && detail && (
+      {/* 客户详情 - 详情优先显示，确保点击后必显（不受 tab 竞态影响） */}
+      {detail && (
         <div>
-          <button onClick={()=>setDetail(null)} className="text-indigo-600 text-sm mb-3 hover:underline">← 返回列表</button>
+          <button onClick={()=>{setDetail(null); setTab("history");}} className="text-indigo-600 text-sm mb-3 hover:underline">← 返回列表</button>
 
           <div className={`${card} p-5 mb-3`}>
             <div className="flex justify-between items-start">
@@ -724,10 +758,12 @@ export default function Home() {
                     )}
                     {(d.used_count||0)>0 && <span className="text-[10px] text-orange-400 ml-1">🔥{d.used_count}</span>}
                   </div>
+                  {d.user_id === currentUserId && (
                   <div className="flex gap-2 shrink-0 ml-2" onClick={e=>e.stopPropagation()}>
                     <button onClick={()=>editDoc(d)} className="text-xs text-indigo-500 hover:text-indigo-700">改</button>
                     <button onClick={()=>deleteDoc(d.id)} className="text-xs text-red-300 hover:text-red-500">删</button>
                   </div>
+                  )}
                 </div>
                 <p className="text-slate-500 text-xs mt-1 line-clamp-2">{d.content}</p>
                 <div className="text-xs text-indigo-400 mt-1.5">查看全文 →</div>
