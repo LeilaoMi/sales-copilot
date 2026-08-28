@@ -8,30 +8,29 @@ export const maxDuration = 300;
 
 // POST /api/knowledge/advise
 // 话术军火：输入客户情境 → 检索知识库 → LLM 生成定制应对话术
-// 输入: { situation: 客户说的原话或情境描述 }
-// 输出: { references: 命中的知识条目, advice: 定制话术 }
+// 10000规模：检索 2000 条 + 混合评分（本地向量兜底，无需 embedding Key 也满血）
 export const POST = withAuth(async (req, { supabase, userId }) => {
   const body = await req.json();
   const situation = String(body.situation || "").trim();
   if (!situation) return fail("请输入客户情境", 400);
 
-  // 1. 检索知识库（全局共享：检索所有人的知识）
+  // 1. 检索知识库（全局共享）— 10000 规模取 2000 条候选
   const { data: docs, error } = await supabase
     .from("knowledge_docs")
     .select("id,title,category,content,embedding")
-    .limit(500);
+    .order("created_at", { ascending: false })
+    .limit(2000);
 
   if (error) return fail(error.message, 500);
 
-  // 懒加载向量化：给历史遗留的无向量条目补算（每次最多5条，逐步自愈）
+  // 懒加载向量化：本地兜底下每次最多补 20 条（无 Key 也能自愈）
   if (docs && docs.length > 0) {
-    const missing = docs.filter((d) => !Array.isArray(d.embedding)).slice(0, 5);
+    const missing = docs.filter((d) => !Array.isArray(d.embedding)).slice(0, 20);
     for (const d of missing) {
       const vec = await embedText(`${d.title}\n${String(d.content).slice(0, 2000)}`);
       if (vec) {
-        // service_role 客户端绕过 RLS，可更新任意贡献者的条目
         await supabase.from("knowledge_docs").update({ embedding: vec }).eq("id", d.id);
-        d.embedding = vec;
+        (d as any).embedding = vec;
       }
     }
   }
@@ -39,7 +38,6 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
   let references: { id: string; title: string; category: string; score?: number }[] = [];
   let contextBlock = "";
 
-  // 中文 bigram 提取（含数字——价格/百分比是销售场景核心信号）
   function extractGrams(text: string): Set<string> {
     const clean = text.replace(/[，。！？、\s]/g, "");
     const grams = new Set<string>();
@@ -52,7 +50,6 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
   }
 
   if (docs && docs.length > 0) {
-    // ===== 混合评分：向量语义 + 关键词命中加权（各占一半）=====
     interface ScoredDoc {
       id: string;
       title: string;
@@ -64,12 +61,14 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
       score: number;
     }
     const situationGrams = extractGrams(situation);
-    const queryVec = await embedText(situation);
+    const queryVec = await embedText(situation); // 本地兜底保证始终有向量
 
     const scoredDocs: ScoredDoc[] = docs.map((d) => {
       let vectorScore = 0;
       if (queryVec && Array.isArray(d.embedding)) {
         vectorScore = cosineSimilarity(queryVec, d.embedding as number[]);
+        // 本地哈希向量的余弦集中在 0.2-0.6 区间，线性映射到 0-1 提升区分度
+        vectorScore = Math.max(0, (vectorScore - 0.15) / 0.45);
       }
       const titleClean = String(d.title).replace(/[\s\*\#]/g, "");
       const bodyClean = String(d.content).replace(/[\s\*\#]/g, "");
@@ -93,11 +92,11 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
       };
     });
 
-    // P1-4 修复：混合检索真正生效 — 按综合分排序取 Top3
+    // 混合检索 Top3
     const top3 = [...scoredDocs]
       .sort((a, b) => b.score - a.score)
       .slice(0, 3)
-      .filter((d) => d.score > 0.25);
+      .filter((d) => d.score > 0.18);
 
     if (top3.length > 0) {
       references = top3.map(({ content: _c, ...rest }) => rest);
@@ -106,7 +105,7 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
         .join("\n\n")}`;
     }
 
-    // 混合检索无果时，中文 bigram 兜底（阈值更宽松）
+    // 兜底：关键词命中
     if (references.length === 0) {
       const kwFallback = [...scoredDocs]
         .filter((x) => x.kwHits >= 2)
@@ -120,7 +119,6 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
       }
     }
 
-    // 贡献激励：命中的知识条目 used_count +1（失败静默）
     if (references.length > 0) {
       for (const r of references) {
         try {
@@ -131,7 +129,6 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
     }
   }
 
-  // 2. 生成定制话术
   const prompt = `你是资深销售教练。客户情境如下：
 """
 ${situation}
@@ -144,7 +141,6 @@ ${situation}
   "suggested_reply": "一段可直接发送的话术，口语化、有同理心、推进成交，150字以内",
   "follow_up": "发送后如何跟进的一句话建议"
 }
-
 规则：
 - 有知识库参考时融合其策略但不要照抄
 - 无参考时基于通用销售方法论
@@ -164,7 +160,6 @@ ${situation}
     const e = jsonStr.lastIndexOf("}");
     if (s === -1 || e === -1) throw new Error("no json");
     const parsed = JSON.parse(jsonStr.slice(s, e + 1));
-
     return ok({
       references,
       analysis: String(parsed.analysis || ""),
