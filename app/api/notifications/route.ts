@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { withAuth, fail } from "@/lib/api-utils";
 
 export const runtime = "nodejs";

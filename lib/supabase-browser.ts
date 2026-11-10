@@ -1,5 +1,5 @@
 // 浏览器端鉴权客户端 - 运行时从服务端拉取公开配置，不再依赖构建时注入
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 let cached: SupabaseClient | null = null;
 
