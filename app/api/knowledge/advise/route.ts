@@ -70,8 +70,8 @@ export const POST = withAuth(async (req, { supabase, userId }) => {
         // 本地哈希向量的余弦集中在 0.2-0.6 区间，线性映射到 0-1 提升区分度
         vectorScore = Math.max(0, (vectorScore - 0.15) / 0.45);
       }
-      const titleClean = String(d.title).replace(/[\s\*\#]/g, "");
-      const bodyClean = String(d.content).replace(/[\s\*\#]/g, "");
+      const titleClean = String(d.title).replace(/[\s*#]/g, "");
+      const bodyClean = String(d.content).replace(/[\s*#]/g, "");
       let titleHits = 0;
       let bodyHits = 0;
       situationGrams.forEach((g) => {

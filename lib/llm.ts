@@ -1,7 +1,7 @@
 // 多模型适配器 - 所有主流厂商兼容 OpenAI 协议
 // 运行时配置优先（网页端动态切换）> 环境变量 > 默认值
 import { optionalEnv } from "./env";
-import { getLlmConfig, LlmRuntimeConfig } from "./llm-config";
+import { getLlmConfig, type LlmRuntimeConfig } from "./llm-config";
 
 interface ResolvedProvider {
   baseURL: string;

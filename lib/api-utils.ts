@@ -1,6 +1,6 @@
 // 统一 API 响应封装 - 消除每个路由里的重复错误处理
-import { NextRequest } from "next/server";
-import { SupabaseClient } from "@supabase/supabase-js";
+import type { NextRequest } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export function ok(data: any) {
   return Response.json(data);
